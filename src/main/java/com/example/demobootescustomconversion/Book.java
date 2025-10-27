@@ -27,5 +27,8 @@ public class Book {
 
     @Field(type = FieldType.Double)
     private Double price;
+
+    @Field(type = FieldType.Date, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS")
+    private String date;
 }
 
