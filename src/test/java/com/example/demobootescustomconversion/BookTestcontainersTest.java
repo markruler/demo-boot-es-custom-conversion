@@ -158,16 +158,14 @@ class BookTestcontainersTest {
     @Test
     void testSaveAndRetrieveBookWithDataNanos() {
         // Given - Create a book with dataNanos (6-digit microsecond precision)
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS");
         LocalDateTime timestamp = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 123456000);
-        String timestampString = timestamp.format(formatter);
 
         Book book = new Book();
         book.setTitle("Time Series Database");
         book.setAuthor("Data Engineer");
         book.setPublicationYear(2024);
         book.setPrice(59.99);
-        book.setDate(timestampString);
+        book.setDate(timestamp);
 
         // When - Save the book
         Book savedBook = bookRepository.save(book);
@@ -176,14 +174,9 @@ class BookTestcontainersTest {
         // Then - Retrieve and verify the nanosecond precision
         Optional<Book> foundBook = bookRepository.findById(bookId);
         assertThat(foundBook).isPresent();
-        assertThat(foundBook.get().getDate()).isNotNull();
-        String expectedDateNanos = "2024-10-27T14:30:45.123456";
-        assertThat(foundBook.get().getDate())
-                .isEqualTo(timestampString)
-                .isEqualTo(expectedDateNanos);
 
-        // Parse and verify the LocalDateTime contains nanosecond precision (microsecond level - 6 digits)
-        LocalDateTime retrievedTimestamp = LocalDateTime.parse(foundBook.get().getDate(), formatter);
+        LocalDateTime retrievedTimestamp = foundBook.get().getDate();
+        assertThat(retrievedTimestamp).isNotNull();
         assertThat(retrievedTimestamp.getYear()).isEqualTo(2024);
         assertThat(retrievedTimestamp.getMonthValue()).isEqualTo(10);
         assertThat(retrievedTimestamp.getDayOfMonth()).isEqualTo(27);
@@ -198,68 +191,31 @@ class BookTestcontainersTest {
     }
 
     @Test
-    void testDataNanosWithFullPrecision() {
-        // Given - Create a book with precise microsecond data (6 digits)
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS");
-        LocalDateTime preciseTimestamp = LocalDateTime.of(2024, 12, 25, 23, 59, 59, 999999000);
-        String timestampString = preciseTimestamp.format(formatter);
-
-        Book book = new Book();
-        book.setTitle("Precision Time Book");
-        book.setAuthor("Time Master");
-        book.setPublicationYear(2024);
-        book.setPrice(79.99);
-        book.setDate(timestampString);
-
-        // When - Save and retrieve
-        Book savedBook = bookRepository.save(book);
-        Optional<Book> foundBook = bookRepository.findById(savedBook.getId());
-
-        // Then - Verify precision is maintained
-        assertThat(foundBook).isPresent();
-        String retrievedString = foundBook.get().getDate();
-        String expectedDateNanos = "2024-12-25T23:59:59.999999";
-        assertThat(retrievedString)
-                .isNotNull()
-                .isEqualTo(timestampString)
-                .isEqualTo(expectedDateNanos);
-
-        // Parse and verify
-        LocalDateTime retrieved = LocalDateTime.parse(retrievedString, formatter);
-        int nanoOfSecond = retrieved.getNano();
-        int microseconds = nanoOfSecond / 1000;
-        assertThat(microseconds).isEqualTo(999999); // Full 6-digit microsecond precision
-    }
-
-    @Test
-    void testDateFieldSupportsRangeQuery() throws InterruptedException {
+    void testDateFieldSupportsRangeQuery() {
         // Given - Create books with different timestamps
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS");
-
         LocalDateTime time1 = LocalDateTime.of(2024, 1, 1, 10, 0, 0, 0);
         LocalDateTime time2 = LocalDateTime.of(2024, 6, 15, 15, 30, 0, 0);
         LocalDateTime time3 = LocalDateTime.of(2024, 12, 31, 23, 59, 0, 0);
 
         Book book1 = new Book();
         book1.setTitle("Early Year Book");
-        book1.setDate(time1.format(formatter));
+        book1.setDate(time1);
 
         Book book2 = new Book();
         book2.setTitle("Mid Year Book");
-        book2.setDate(time2.format(formatter));
+        book2.setDate(time2);
 
         Book book3 = new Book();
         book3.setTitle("Late Year Book");
-        book3.setDate(time3.format(formatter));
+        book3.setDate(time3);
 
         bookRepository.save(book1);
         bookRepository.save(book2);
         bookRepository.save(book3);
 
-        // Wait for indexing
-        Thread.sleep(1000);
-
         // When - Use Elasticsearch range query to find books within a date range
+        // Note: Range query works with Text field that contains ISO8601 format strings
+        // Use the custom converter's format (6-digit microseconds)
         String startDate = "2024-02-01T00:00:00.000000";
         String endDate = "2024-11-30T23:59:59.999999";
 
@@ -267,20 +223,22 @@ class BookTestcontainersTest {
                 .greaterThanEqual(startDate)
                 .lessThanEqual(endDate);
 
-        org.springframework.data.elasticsearch.core.query.Query rangeQuery = new CriteriaQuery(criteria);
+        Query rangeQuery = new CriteriaQuery(criteria);
 
         SearchHits<Book> searchHits = elasticsearchOperations.search(rangeQuery, Book.class);
         List<Book> books = searchHits.getSearchHits().stream()
-                .map(org.springframework.data.elasticsearch.core.SearchHit::getContent)
+                .map(SearchHit::getContent)
                 .toList();
 
-        // Then - Verify only books within range are found
+        // Then - Verify books within range are found
+        // Note: FieldType.Keyword uses exact string comparison, ISO8601 format strings
+        // are lexicographically comparable and work correctly for date range queries
         assertThat(books).hasSize(1);
-        assertThat(books.get(0).getTitle()).isEqualTo("Mid Year Book");
+        assertThat(books.stream().map(Book::getTitle)).contains("Mid Year Book");
     }
 
     @Test
-    void testDateFieldGreaterThanQuery() throws InterruptedException {
+    void testDateFieldGreaterThanQuery() {
         // Given - Create books with different timestamps
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS");
 
@@ -290,24 +248,29 @@ class BookTestcontainersTest {
 
         Book book1 = new Book();
         book1.setTitle("First Book");
-        book1.setDate(time1.format(formatter));
+        book1.setDate(time1);
 
         Book book2 = new Book();
         book2.setTitle("Second Book");
-        book2.setDate(time2.format(formatter));
+        book2.setDate(time2);
 
         Book book3 = new Book();
         book3.setTitle("Third Book");
-        book3.setDate(time3.format(formatter));
+        book3.setDate(time3);
 
         bookRepository.save(book1);
         bookRepository.save(book2);
         bookRepository.save(book3);
 
-        // Thread.sleep(1000);
-
         // When - Use Elasticsearch gt query to find books after base time
-        String baseTime = time2.format(formatter);
+        // Note: Converter automatically converts LocalDateTime to String format for storage
+        // Use the custom converter's format to ensure consistency
+        // The converter formats as: yyyy-MM-dd'T'HH:mm:ss.XXXXXX (6-digit microseconds)
+        int nanoOfSecond = time2.getNano();
+        int microseconds = nanoOfSecond / 1000;
+        String baseTime = String.format("%s.%06d",
+                time2.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")),
+                microseconds);
 
         Criteria criteria = new Criteria("date").greaterThan(baseTime);
 
@@ -318,13 +281,14 @@ class BookTestcontainersTest {
                 .map(SearchHit::getContent)
                 .toList();
 
-        // Then - Verify only later books are found
+        // Then - Verify later books are found
+        // Note: FieldType.Keyword uses exact string comparison, so format must match exactly
         assertThat(books).hasSize(1);
-        assertThat(books.getFirst().getTitle()).isEqualTo("Third Book");
+        assertThat(books.stream().map(Book::getTitle)).contains("Third Book");
     }
 
     @Test
-    void testDateFieldLessThanQuery() throws InterruptedException {
+    void testDateFieldLessThanQuery() {
         // Given - Create books with different timestamps
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS");
 
@@ -334,24 +298,29 @@ class BookTestcontainersTest {
 
         Book book1 = new Book();
         book1.setTitle("June Book");
-        book1.setDate(time1.format(formatter));
+        book1.setDate(time1);
 
         Book book2 = new Book();
         book2.setTitle("July Book");
-        book2.setDate(time2.format(formatter));
+        book2.setDate(time2);
 
         Book book3 = new Book();
         book3.setTitle("August Book");
-        book3.setDate(time3.format(formatter));
+        book3.setDate(time3);
 
         bookRepository.save(book1);
         bookRepository.save(book2);
         bookRepository.save(book3);
 
-        // Thread.sleep(1000);
-
         // When - Use Elasticsearch lt query to find books before base time
-        String baseTime = time2.format(formatter);
+        // Note: Converter automatically converts LocalDateTime to String format for storage
+        // Use the custom converter's format to ensure consistency
+        // The converter formats as: yyyy-MM-dd'T'HH:mm:ss.XXXXXX (6-digit microseconds)
+        int nanoOfSecond = time2.getNano();
+        int microseconds = nanoOfSecond / 1000;
+        String baseTime = String.format("%s.%06d",
+                time2.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")),
+                microseconds);
 
         Criteria criteria = new Criteria("date").lessThan(baseTime);
 
@@ -364,8 +333,110 @@ class BookTestcontainersTest {
                 .map(SearchHit::getContent)
                 .toList();
 
-        // Then - Verify only earlier books are found
+        // Then - Verify earlier books are found
         assertThat(books).hasSize(1);
-        assertThat(books.getFirst().getTitle()).isEqualTo("June Book");
+        assertThat(books.stream().map(Book::getTitle)).contains("June Book");
+    }
+
+    @Test
+    void testDateNanosFieldSupportsRangeQuery() {
+        // Given - Create books with different timestamps using dateNanos field (String type)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSS");
+
+        String time1 = LocalDateTime.of(2024, 1, 1, 10, 0, 0, 0).format(formatter);
+        String time2 = LocalDateTime.of(2024, 6, 15, 15, 30, 0, 0).format(formatter);
+        String time3 = LocalDateTime.of(2024, 12, 31, 23, 59, 0, 0).format(formatter);
+
+        Book book1 = new Book();
+        book1.setTitle("Early Year Book Nanos");
+        book1.setDateNanos(time1);
+
+        Book book2 = new Book();
+        book2.setTitle("Mid Year Book Nanos");
+        book2.setDateNanos(time2);
+
+        Book book3 = new Book();
+        book3.setTitle("Late Year Book Nanos");
+        book3.setDateNanos(time3);
+
+        bookRepository.save(book1);
+        bookRepository.save(book2);
+        bookRepository.save(book3);
+
+        // When - Use Elasticsearch range query with dateNanos field (Date_Nanos type with String)
+        // FieldType.Date_Nanos stores as Date type in Elasticsearch, supports native date range queries
+        String startDate = LocalDateTime.of(2024, 2, 1, 0, 0, 0, 0).format(formatter);
+        String endDate = LocalDateTime.of(2024, 11, 30, 23, 59, 59, 999999000).format(formatter);
+
+        Criteria criteria = new Criteria("dateNanos")
+                .greaterThanEqual(startDate)
+                .lessThanEqual(endDate);
+
+        Query rangeQuery = new CriteriaQuery(criteria);
+
+        SearchHits<Book> searchHits = elasticsearchOperations.search(rangeQuery, Book.class);
+        List<Book> books = searchHits.getSearchHits().stream()
+                .map(SearchHit::getContent)
+                .toList();
+
+        // Then - Verify books within range are found
+        // FieldType.Date_Nanos provides native date comparison in Elasticsearch
+        assertThat(books).hasSize(1);
+        assertThat(books.stream().map(Book::getTitle)).contains("Mid Year Book Nanos");
+    }
+
+    @Test
+    void testDateNanosFieldWithMicrosecondPrecision() {
+        // Given - Create books with precise microsecond timestamps using dateNanos field (String type)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSS");
+
+        String time1 = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 123456000).format(formatter);
+        String time2 = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 456789000).format(formatter);
+        String time3 = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 789012000).format(formatter);
+
+        Book book1 = new Book();
+        book1.setTitle("Precise Book 1");
+        book1.setDateNanos(time1);
+
+        Book book2 = new Book();
+        book2.setTitle("Precise Book 2");
+        book2.setDateNanos(time2);
+
+        Book book3 = new Book();
+        book3.setTitle("Precise Book 3");
+        book3.setDateNanos(time3);
+
+        bookRepository.save(book1);
+        bookRepository.save(book2);
+        bookRepository.save(book3);
+
+        // When - Query books with microsecond precision range
+        String startTime = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 200000000).format(formatter);
+        String endTime = LocalDateTime.of(2024, 10, 27, 14, 30, 45, 800000000).format(formatter);
+
+        Criteria criteria = new Criteria("dateNanos")
+                .greaterThanEqual(startTime)
+                .lessThanEqual(endTime);
+
+        Query rangeQuery = new CriteriaQuery(criteria);
+
+        SearchHits<Book> searchHits = elasticsearchOperations.search(rangeQuery, Book.class);
+        List<Book> books = searchHits.getSearchHits().stream()
+                .map(SearchHit::getContent)
+                .toList();
+
+        // Then - Verify books within microsecond range are found
+        assertThat(books).hasSize(2);
+        assertThat(books.stream().map(Book::getTitle)).contains("Precise Book 2", "Precise Book 3");
+
+        // Verify microsecond precision is maintained
+        Optional<Book> foundBook = books.stream()
+                .filter(b -> "Precise Book 2".equals(b.getTitle()))
+                .findFirst();
+
+        assertThat(foundBook).isPresent();
+        String retrievedTime = foundBook.get().getDateNanos();
+        assertThat(retrievedTime).isNotNull();
+        assertThat(retrievedTime).isEqualTo(time2); // Verify exact string match with microsecond precision
     }
 }

@@ -8,6 +8,8 @@ import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 
+import java.time.LocalDateTime;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -28,7 +30,15 @@ public class Book {
     @Field(type = FieldType.Double)
     private Double price;
 
-    @Field(type = FieldType.Date, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS")
-    private String date;
+    /**
+     * @see ElasticsearchConfig#FORMATTER
+     * @see ElasticsearchConfig#LocalDateTimeToStringConverter
+     * @see ElasticsearchConfig#StringToLocalDateTimeConverter
+     */
+    @Field(type = FieldType.Keyword)
+    private LocalDateTime date;
+
+    @Field(type = FieldType.Date_Nanos, pattern = {"uuuu-MM-dd'T'HH:mm:ss.SSSSSS"})
+    private String dateNanos;
 }
 
